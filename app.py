@@ -2,33 +2,65 @@ import streamlit as st
 import pandas as pd
 import datetime
 
-# Caricamento dati mezzi dal file Excel
+# Carica mezzi
 @st.cache_data
 def load_mezzi():
-    df = pd.read_excel("Automezzi ASP (8).xlsx", skiprows=1)  # Saltiamo la prima riga doppia intestazione
+    df = pd.read_excel("Automezzi ASP (8).xlsx", skiprows=1)
     return df
 
 mezzi = load_mezzi()
 
-st.title("🚐 Calendario prenotazioni automezzi")
-
-# Selezione mezzo (usiamo il MODELLO come identificativo)
-mezzo = st.selectbox("Seleziona un mezzo", mezzi["MODELLO"].dropna().unique())
-
-# Carica prenotazioni esistenti
+# Carica prenotazioni
 try:
-    prenotazioni = pd.read_csv("prenotazioni.csv")
+    prenotazioni = pd.read_csv("prenotazioni.csv", parse_dates=["Data"])
 except FileNotFoundError:
     prenotazioni = pd.DataFrame(columns=["Modello", "Data", "Ora Inizio", "Ora Fine", "Utente"])
 
-# Mostra prenotazioni già fatte
-st.subheader(f"📅 Prenotazioni per {mezzo}")
-st.table(prenotazioni[prenotazioni["Modello"] == mezzo])
+st.title("🚐 Calendario prenotazioni automezzi")
 
-# Form prenotazione
+# --- NAVIGAZIONE SETTIMANA ---
+oggi = datetime.date.today()
+if "inizio_settimana" not in st.session_state:
+    st.session_state.inizio_settimana = oggi - datetime.timedelta(days=oggi.weekday())
+
+col1, col2, col3 = st.columns([1, 2, 1])
+with col1:
+    if st.button("⬅️ Settimana precedente"):
+        st.session_state.inizio_settimana -= datetime.timedelta(days=7)
+with col3:
+    if st.button("➡️ Settimana successiva"):
+        st.session_state.inizio_settimana += datetime.timedelta(days=7)
+
+inizio_settimana = st.session_state.inizio_settimana
+fine_settimana = inizio_settimana + datetime.timedelta(days=6)
+
+st.write(f"📅 Settimana dal **{inizio_settimana}** al **{fine_settimana}**")
+
+# Giorni della settimana
+giorni = [inizio_settimana + datetime.timedelta(days=i) for i in range(7)]
+giorni_labels = [g.strftime("%a %d/%m") for g in giorni]
+
+# --- COSTRUZIONE TABELLA CALENDARIO ---
+calendario = pd.DataFrame(index=mezzi["MODELLO"].dropna().unique(), columns=giorni_labels)
+
+for _, row in prenotazioni.iterrows():
+    if inizio_settimana <= row["Data"].date() <= fine_settimana:
+        giorno_label = row["Data"].strftime("%a %d/%m")
+        info = f"{row['Ora Inizio']}–{row['Ora Fine']} ({row['Utente']})"
+        if pd.isna(calendario.at[row["Modello"], giorno_label]):
+            calendario.at[row["Modello"], giorno_label] = info
+        else:
+            calendario.at[row["Modello"], giorno_label] += f"\n{info}"
+
+# Mostra tabella
+st.subheader("📊 Vista settimanale tipo calendario")
+st.dataframe(calendario.fillna(""), use_container_width=True)
+
+# --- FORM NUOVA PRENOTAZIONE ---
 st.subheader("➕ Nuova prenotazione")
 with st.form("nuova_prenotazione"):
-    data = st.date_input("Data", datetime.date.today())
+    mezzo = st.selectbox("Seleziona mezzo", mezzi["MODELLO"].dropna().unique())
+    data = st.date_input("Data", oggi)
     ora_inizio = st.time_input("Ora inizio", datetime.time(9, 0))
     ora_fine = st.time_input("Ora fine", datetime.time(17, 0))
     utente = st.text_input("Nome utente")
